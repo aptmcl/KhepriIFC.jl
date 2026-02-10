@@ -7,6 +7,7 @@ Targets IFC4 schema.
 
 import PythonCall: Py, pynew, pybuiltins, pyimport, pylist, pydict, pycopy!
 import KhepriBase: slab_family_thickness, slab_family_elevation,
+                   ceiling_family_thickness, ceiling_family_elevation,
                    level_height, family_profile, r_thickness, l_thickness,
                    Wall, Slab, Beam, Column, Door, Window
 
@@ -234,6 +235,14 @@ ifc_faceted_brep(model, face_point_lists) =
       model.createIfcClosedShell(faces))
   end
 
+ifc_box_faces(p0, p1, p2, p3, p4, p5, p6, p7) =
+  [[p0, p3, p2, p1],   # bottom
+   [p4, p5, p6, p7],   # top
+   [p0, p1, p5, p4],   # front
+   [p2, p3, p7, p6],   # back
+   [p0, p4, p7, p3],   # left
+   [p1, p2, p6, p5]]   # right
+
 ifc_shape_representation(st, rep_type, items) =
   st.model.createIfcShapeRepresentation(
     st.body_context, "Body", rep_type, pylist(items))
@@ -251,7 +260,7 @@ add_pset!(st, element, pset_name, properties) =
 ####################################################
 # Element creation helpers
 
-ifc_create_element!(st, ifc_class, name, solid, placement_origin; storey=default_storey(st)) =
+ifc_create_element!(st, ifc_class, name, solid, placement_origin; storey=default_storey(st), predefined_type=nothing) =
   let api = st.ifc_api,
       model = st.model,
       element = api.run("root.create_entity", model, ifc_class=ifc_class, name=name),
@@ -261,12 +270,13 @@ ifc_create_element!(st, ifc_class, name, solid, placement_origin; storey=default
       placement = ifc_local_placement(model, placement_origin)
     element.Representation = product_shape
     element.ObjectPlacement = placement
+    !isnothing(predefined_type) && (element.PredefinedType = predefined_type)
     api.run("spatial.assign_container", model,
       relating_structure=storey, products=pylist([element]))
     element
   end
 
-ifc_create_brep_element!(st, ifc_class, name, brep, placement_origin; storey=default_storey(st)) =
+ifc_create_brep_element!(st, ifc_class, name, brep, placement_origin; storey=default_storey(st), predefined_type=nothing) =
   let api = st.ifc_api,
       model = st.model,
       element = api.run("root.create_entity", model, ifc_class=ifc_class, name=name),
@@ -276,6 +286,7 @@ ifc_create_brep_element!(st, ifc_class, name, brep, placement_origin; storey=def
       placement = ifc_local_placement(model, placement_origin)
     element.Representation = product_shape
     element.ObjectPlacement = placement
+    !isnothing(predefined_type) && (element.PredefinedType = predefined_type)
     api.run("spatial.assign_container", model,
       relating_structure=storey, products=pylist([element]))
     element
@@ -751,6 +762,259 @@ ifc_create_window!(st, opening, storey, origin, x_dir, width, height) =
 
 # Override realize for Door/Window to prevent default KhepriBase geometry
 KhepriBase.realize(b::IFC_backend, s::Union{Door, Window}) = next_id!(b)
+
+####################################################
+# BIM Ceiling, Stair, Ramp, Railing operations
+
+# Ceiling — IfcCovering with PredefinedType=CEILING
+KhepriBase.b_ceiling(b::IFC_backend, profile, level, family) =
+  let st = ensure_init!(b),
+      model = st.model,
+      thickness = ceiling_family_thickness(b, family),
+      elevation = level_height(b, level) - thickness + ceiling_family_elevation(b, family),
+      pts = path_vertices(outer_path(profile)),
+      wpts = in_world.(pts),
+      pts_2d = [ifc_point2d(model, Float64(p.x), Float64(p.y)) for p in wpts],
+      poly = model.createIfcPolyLine(pylist([pts_2d..., pts_2d[1]])),
+      closed_profile = model.createIfcArbitraryClosedProfileDef("AREA", pybuiltins.None, poly),
+      origin = xyz(0, 0, elevation),
+      position = ifc_axis2placement3d(model, origin, (0,0,1), (1,0,0)),
+      solid = ifc_extruded_solid(model, closed_profile, (0,0,1), thickness, position=position),
+      covering = ifc_create_element!(st, "IfcCovering", "Ceiling", solid, origin,
+        storey=get_or_create_storey!(st, level_height(b, level)),
+        predefined_type="CEILING")
+    if hasproperty(family, :bottom_material)
+      let mat = material_ref(b, family.bottom_material)
+        mat isa IFCMaterial && assign_material!(st, covering, mat)
+      end
+    end
+    add_pset!(st, covering, "Pset_CoveringCommon",
+      Dict("IsExternal" => false))
+    next_id!(b)
+  end
+
+# Stair Landing — IfcSlab with PredefinedType=LANDING
+KhepriBase.b_stair_landing(b::IFC_backend, region, level, family) =
+  let st = ensure_init!(b),
+      model = st.model,
+      thickness = slab_family_thickness(b, family),
+      elevation = level_height(b, level) + slab_family_elevation(b, family),
+      pts = path_vertices(outer_path(region)),
+      wpts = in_world.(pts),
+      pts_2d = [ifc_point2d(model, Float64(p.x), Float64(p.y)) for p in wpts],
+      poly = model.createIfcPolyLine(pylist([pts_2d..., pts_2d[1]])),
+      closed_profile = model.createIfcArbitraryClosedProfileDef("AREA", pybuiltins.None, poly),
+      origin = xyz(0, 0, elevation),
+      position = ifc_axis2placement3d(model, origin, (0,0,1), (1,0,0)),
+      solid = ifc_extruded_solid(model, closed_profile, (0,0,1), thickness, position=position),
+      landing = ifc_create_element!(st, "IfcSlab", "Landing", solid, origin,
+        storey=get_or_create_storey!(st, level_height(b, level)),
+        predefined_type="LANDING")
+    if hasproperty(family, :top_material)
+      let mat = material_ref(b, family.top_material)
+        mat isa IFCMaterial && assign_material!(st, landing, mat)
+      end
+    end
+    add_pset!(st, landing, "Pset_SlabCommon",
+      Dict("IsExternal" => false))
+    next_id!(b)
+  end
+
+# Stair — IfcStairFlight with FacetedBrep step geometry
+KhepriBase.b_stair(b::IFC_backend, base_point, direction, bottom_level, top_level, family) =
+  let st = ensure_init!(b),
+      model = st.model,
+      bottom_h = level_height(b, bottom_level),
+      top_h = level_height(b, top_level),
+      total_h = top_h - bottom_h,
+      n_steps = Int(round(total_h / family.riser_height)),
+      riser_h = total_h / n_steps,
+      tread_d = family.tread_depth,
+      w = family.width,
+      dir = unitized(direction),
+      perp = cross(vz(1), dir),
+      bp = in_world(base_point),
+      faces = []
+    for i in 0:(n_steps - 1)
+      let base = bp + dir * (i * tread_d) + vz(bottom_h + i * riser_h),
+          tread = [base + vz(riser_h),
+                   base + perp * w + vz(riser_h),
+                   base + dir * tread_d + perp * w + vz(riser_h),
+                   base + dir * tread_d + vz(riser_h)]
+        push!(faces, tread)
+        if family.has_risers
+          let riser = [base, base + perp * w,
+                       base + perp * w + vz(riser_h), base + vz(riser_h)]
+            push!(faces, riser)
+          end
+        end
+      end
+    end
+    let brep = ifc_faceted_brep(model, faces),
+        flight = ifc_create_brep_element!(st, "IfcStairFlight", "Stair", brep, u0(),
+          storey=get_or_create_storey!(st, bottom_h))
+      if hasproperty(family, :tread_material)
+        let mat = material_ref(b, family.tread_material)
+          mat isa IFCMaterial && assign_material!(st, flight, mat)
+        end
+      end
+      add_pset!(st, flight, "Pset_StairFlightCommon",
+        Dict("NumberOfRisers" => n_steps,
+             "NumberOfTreads" => n_steps,
+             "RiserHeight" => Float64(riser_h),
+             "TreadLength" => Float64(tread_d)))
+      next_id!(b)
+    end
+  end
+
+# Spiral Stair — IfcStairFlight with polar-coordinate tread geometry
+KhepriBase.b_spiral_stair(b::IFC_backend, center, radius, start_angle, included_angle,
+                           clockwise, bottom_level, top_level, family) =
+  let st = ensure_init!(b),
+      model = st.model,
+      bottom_h = level_height(b, bottom_level),
+      top_h = level_height(b, top_level),
+      total_h = top_h - bottom_h,
+      n_steps = Int(round(total_h / family.riser_height)),
+      riser_h = total_h / n_steps,
+      sign = clockwise ? -1 : 1,
+      angle_step = sign * included_angle / n_steps,
+      w = family.width,
+      r_inner = radius - w/2,
+      r_outer = radius + w/2,
+      c = in_world(center),
+      faces = []
+    for i in 0:(n_steps - 1)
+      let a0 = start_angle + i * angle_step,
+          a1 = a0 + angle_step,
+          h = bottom_h + (i + 1) * riser_h,
+          tread = [c + vpol(r_inner, a0) + vz(h),
+                   c + vpol(r_outer, a0) + vz(h),
+                   c + vpol(r_outer, a1) + vz(h),
+                   c + vpol(r_inner, a1) + vz(h)]
+        push!(faces, tread)
+      end
+    end
+    let brep = ifc_faceted_brep(model, faces),
+        flight = ifc_create_brep_element!(st, "IfcStairFlight", "SpiralStair", brep, u0(),
+          storey=get_or_create_storey!(st, bottom_h))
+      if hasproperty(family, :tread_material)
+        let mat = material_ref(b, family.tread_material)
+          mat isa IFCMaterial && assign_material!(st, flight, mat)
+        end
+      end
+      add_pset!(st, flight, "Pset_StairFlightCommon",
+        Dict("NumberOfRisers" => n_steps,
+             "NumberOfTreads" => n_steps,
+             "RiserHeight" => Float64(riser_h)))
+      next_id!(b)
+    end
+  end
+
+# Ramp — IfcRampFlight with inclined solid geometry
+KhepriBase.b_ramp(b::IFC_backend, path, bottom_level, top_level, family) =
+  let st = ensure_init!(b),
+      model = st.model,
+      bottom_h = level_height(b, bottom_level),
+      top_h = level_height(b, top_level),
+      w = family.width,
+      th = family.thickness,
+      p0 = in_world(path_start(path)),
+      p1 = in_world(path_end(path)),
+      dir = unitized(p1 - p0),
+      perp = cross(dir, vz(1)),
+      b0 = p0 + perp * (w/2) + vz(bottom_h),
+      b1 = p0 - perp * (w/2) + vz(bottom_h),
+      b2 = p0 - perp * (w/2) + vz(bottom_h - th),
+      b3 = p0 + perp * (w/2) + vz(bottom_h - th),
+      t0 = p1 + perp * (w/2) + vz(top_h),
+      t1 = p1 - perp * (w/2) + vz(top_h),
+      t2 = p1 - perp * (w/2) + vz(top_h - th),
+      t3 = p1 + perp * (w/2) + vz(top_h - th),
+      faces = [
+        [b0, t0, t1, b1],       # top surface
+        [b3, b2, t2, t3],       # bottom surface
+        [b0, b3, t3, t0],       # left side
+        [b1, t1, t2, b2],       # right side
+        [b0, b1, b2, b3],       # start face
+        [t0, t3, t2, t1]],      # end face
+      brep = ifc_faceted_brep(model, faces),
+      ramp_flight = ifc_create_brep_element!(st, "IfcRampFlight", "Ramp", brep, u0(),
+        storey=get_or_create_storey!(st, bottom_h))
+    if hasproperty(family, :top_material)
+      let mat = material_ref(b, family.top_material)
+        mat isa IFCMaterial && assign_material!(st, ramp_flight, mat)
+      end
+    end
+    let run = norm(p1 - p0),
+        rise = top_h - bottom_h,
+        slope = run > 0 ? rise / run : 0.0
+      add_pset!(st, ramp_flight, "Pset_RampFlightCommon",
+        Dict("Slope" => Float64(slope)))
+    end
+    next_id!(b)
+  end
+
+# Railing — IfcRailing with composite rail + post geometry
+KhepriBase.b_railing(b::IFC_backend, path, level, host, family) =
+  let st = ensure_init!(b),
+      model = st.model,
+      h = family.height,
+      base = level_height(b, level),
+      len = path_length(path),
+      n_posts = max(2, Int(ceil(len / family.post_spacing)) + 1),
+      post_w = 0.05,
+      rail_w = 0.05,
+      rail_h = 0.05,
+      faces = []
+    # Posts
+    for t in division(0, len, n_posts - 1)
+      let pt = in_world(location_at_length(path, t)),
+          hw = post_w / 2
+        append!(faces, ifc_box_faces(
+          pt - vx(hw) - vy(hw) + vz(base),
+          pt + vx(hw) - vy(hw) + vz(base),
+          pt + vx(hw) + vy(hw) + vz(base),
+          pt - vx(hw) + vy(hw) + vz(base),
+          pt - vx(hw) - vy(hw) + vz(base + h),
+          pt + vx(hw) - vy(hw) + vz(base + h),
+          pt + vx(hw) + vy(hw) + vz(base + h),
+          pt - vx(hw) + vy(hw) + vz(base + h)))
+      end
+    end
+    # Rail segments
+    let vs = path_vertices(path)
+      for i in 1:(length(vs) - 1)
+        let p0 = in_world(vs[i]),
+            p1 = in_world(vs[i + 1]),
+            d = unitized(p1 - p0),
+            perp = cross(d, vz(1)),
+            hw = rail_w / 2,
+            z0 = base + h - rail_h,
+            c0 = p0 + perp * hw + vz(z0),
+            c1 = p1 + perp * hw + vz(z0),
+            c2 = p1 - perp * hw + vz(z0),
+            c3 = p0 - perp * hw + vz(z0)
+          append!(faces, ifc_box_faces(
+            c0, c1, c2, c3,
+            c0 + vz(rail_h), c1 + vz(rail_h),
+            c2 + vz(rail_h), c3 + vz(rail_h)))
+        end
+      end
+    end
+    let brep = ifc_faceted_brep(model, faces),
+        railing_el = ifc_create_brep_element!(st, "IfcRailing", "Railing", brep, u0(),
+          storey=get_or_create_storey!(st, base))
+      if hasproperty(family, :material)
+        let mat = material_ref(b, family.material)
+          mat isa IFCMaterial && assign_material!(st, railing_el, mat)
+        end
+      end
+      add_pset!(st, railing_el, "Pset_RailingCommon",
+        Dict("Height" => Float64(h)))
+      next_id!(b)
+    end
+  end
 
 ####################################################
 # Delete all refs — reset the IFC model

@@ -296,4 +296,135 @@ using Test
     rm(tmpfile)
     delete_all_shapes()
   end
+
+  @testset "BIM ceiling" begin
+    backend(ifc)
+    delete_all_shapes()
+
+    ceiling(region=[xy(0,0), xy(10,0), xy(10,8), xy(0,8)], level=level(3))
+
+    tmpfile = tempname() * ".ifc"
+    save_ifc(tmpfile)
+    @test isfile(tmpfile)
+
+    content = read(tmpfile, String)
+    @test occursin("IFCCOVERING", content)
+    @test occursin("Pset_CoveringCommon", content)
+
+    rm(tmpfile)
+    delete_all_shapes()
+  end
+
+  @testset "BIM stair" begin
+    backend(ifc)
+    delete_all_shapes()
+
+    stair(xy(0,0), vy(1), level(0), level(3))
+
+    tmpfile = tempname() * ".ifc"
+    save_ifc(tmpfile)
+    @test isfile(tmpfile)
+
+    content = read(tmpfile, String)
+    @test occursin("IFCSTAIRFLIGHT", content)
+    @test occursin("Pset_StairFlightCommon", content)
+
+    rm(tmpfile)
+    delete_all_shapes()
+  end
+
+  @testset "BIM spiral stair" begin
+    backend(ifc)
+    delete_all_shapes()
+
+    spiral_stair(xy(0,0), 2.0, 0, 2*pi, true, level(0), level(3))
+
+    tmpfile = tempname() * ".ifc"
+    save_ifc(tmpfile)
+    @test isfile(tmpfile)
+
+    content = read(tmpfile, String)
+    @test occursin("IFCSTAIRFLIGHT", content)
+
+    rm(tmpfile)
+    delete_all_shapes()
+  end
+
+  @testset "BIM stair landing" begin
+    backend(ifc)
+    delete_all_shapes()
+
+    stair_landing(region=[xy(0,0), xy(2,0), xy(2,1), xy(0,1)], level=level(3))
+
+    tmpfile = tempname() * ".ifc"
+    save_ifc(tmpfile)
+    @test isfile(tmpfile)
+
+    content = read(tmpfile, String)
+    @test occursin("IFCSLAB", content)
+    @test occursin(".LANDING.", content)
+
+    rm(tmpfile)
+    delete_all_shapes()
+  end
+
+  @testset "BIM ramp" begin
+    backend(ifc)
+    delete_all_shapes()
+
+    ramp(xy(0,0), xy(5,0), bottom_level=level(0), top_level=level(1))
+
+    tmpfile = tempname() * ".ifc"
+    save_ifc(tmpfile)
+    @test isfile(tmpfile)
+
+    content = read(tmpfile, String)
+    @test occursin("IFCRAMPFLIGHT", content)
+    @test occursin("Pset_RampFlightCommon", content)
+
+    rm(tmpfile)
+    delete_all_shapes()
+  end
+
+  @testset "BIM railing" begin
+    backend(ifc)
+    delete_all_shapes()
+
+    railing(path=[xy(0,0), xy(0,5)], level=level(0))
+
+    tmpfile = tempname() * ".ifc"
+    save_ifc(tmpfile)
+    @test isfile(tmpfile)
+
+    content = read(tmpfile, String)
+    @test occursin("IFCRAILING", content)
+    @test occursin("Pset_RailingCommon", content)
+
+    rm(tmpfile)
+    delete_all_shapes()
+  end
+
+  @testset "BIM stairwell" begin
+    backend(ifc)
+    delete_all_shapes()
+
+    lvl0 = level(0)
+    lvl3 = level(3)
+    stair(xy(0,0), vy(1), lvl0, lvl3)
+    stair_landing(region=[xy(0,0), xy(2,0), xy(2,1), xy(0,1)], level=lvl3)
+    railing(path=[xy(0,0), xy(0,5)], level=lvl0)
+    railing(path=[xy(2,0), xy(2,5)], level=lvl0)
+
+    tmpfile = tempname() * ".ifc"
+    save_ifc(tmpfile)
+    @test isfile(tmpfile)
+
+    content = read(tmpfile, String)
+    @test occursin("IFCSTAIRFLIGHT", content)
+    @test occursin("IFCSLAB", content)
+    @test occursin("IFCRAILING", content)
+
+    rm(tmpfile)
+    delete_all_shapes()
+  end
 end
