@@ -328,7 +328,12 @@ KhepriBase.b_new_material(b::IFC_backend, name,
                           ior,
                           transmission, transmission_roughness,
                           emission_color,
-                          emission_strength) =
+                          emission_strength,
+                          sheen_color, sheen_roughness,
+                          anisotropy, anisotropy_direction,
+                          ambient_occlusion, normal_map, bent_normal, clearcoat_normal,
+                          post_lighting_color,
+                          absorption, micro_thickness, thickness) =
   ifc_material(name,
     red=Float64(red(base_color)),
     green=Float64(green(base_color)),
