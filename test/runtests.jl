@@ -12,7 +12,7 @@ using Test
   end
 
   @testset "Backend type" begin
-    @test ifc isa KhepriBase.IOBackend
+    @test ifc isa KhepriBase.LocalBackend
     @test backend_name(ifc) == "IFC"
     @test void_ref(ifc) == -1
   end

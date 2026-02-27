@@ -8,8 +8,8 @@ include("IFC.jl")
 
 function __init__()
   # Initialize Python modules
-  PythonCall.pycopy!(ifc.extra.ifc_mod, pyimport("ifcopenshell"))
-  PythonCall.pycopy!(ifc.extra.ifc_api, pyimport("ifcopenshell.api"))
+  PythonCall.pycopy!(ifc.ifc_state.ifc_mod, pyimport("ifcopenshell"))
+  PythonCall.pycopy!(ifc.ifc_state.ifc_api, pyimport("ifcopenshell.api"))
 
   # Map standard Khepri materials to IFC materials
   set_material(IFC_backend, material_basic, ifc_neutral)

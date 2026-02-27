@@ -69,20 +69,20 @@ IFCState() = IFCState(
 ####################################################
 # Backend type definition
 
-abstract type IFCKey end
-const IFCId = Int
-const IFCRef = NativeRef{IFCKey, IFCId}
-
-const IFC_backend = IOBackend{IFCKey, IFCId, IFCState}
-
-KhepriBase.backend_name(::IFC_backend) = "IFC"
-KhepriBase.has_boolean_ops(::Type{IFC_backend}) = HasBooleanOps{false}()
-KhepriBase.void_ref(b::IFC_backend) = -1
-
-const ifc = IFC_backend(extra=IFCState())
+@defbackend IFC IFC begin
+  id_type = Int
+  void_ref = -1
+  parent = LocalBackend
+  mixin(local_shapes)
+  view::View = default_view()
+  ifc_state::IFCState = IFCState()
+end
+const IFC_backend = IFC  # backward compatibility alias
+const ifc = IFC()
+KhepriBase.has_boolean_ops(::Type{IFC}) = HasBooleanOps{false}()
 
 next_id!(b::IFC_backend) =
-  let st = b.extra
+  let st = b.ifc_state
     st.entity_counter += 1
     st.entity_counter
   end
@@ -91,7 +91,7 @@ next_id!(b::IFC_backend) =
 # Lazy IFC model initialization
 
 ensure_init!(b::IFC_backend) =
-  let st = b.extra
+  let st = b.ifc_state
     if !st.initialized
       init_ifc_model!(st)
     end
@@ -1025,7 +1025,7 @@ KhepriBase.b_railing(b::IFC_backend, path, level, host, family) =
 # Delete all refs — reset the IFC model
 
 KhepriBase.b_delete_all_shape_refs(b::IFC_backend) =
-  let st = b.extra
+  let st = b.ifc_state
     empty!(b.shapes)
     for ss in values(b.layers)
       empty!(ss)
@@ -1053,8 +1053,7 @@ KhepriBase.b_delete_all_shape_refs(b::IFC_backend) =
 
 save_ifc(path::String, b::IFC_backend=ifc) =
   let st = ensure_init!(b)
-    # Commit any pending shapes from the manual transaction
-    KhepriBase.commit_transaction(b)
+    KhepriBase.realize_shapes(b)
     st.model.write(path)
     path
   end
