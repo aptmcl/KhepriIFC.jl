@@ -321,19 +321,14 @@ assign_material!(st, element, mat::IFCMaterial) =
       products=pylist([element]), material=ifc_mat)
   end
 
-KhepriBase.b_new_material(b::IFC_backend, name,
+KhepriBase.b_material(b::IFC_backend, name,
                           base_color,
-                          metallic, specular, roughness,
-                          clearcoat, clearcoat_roughness,
+                          metallic, roughness, specular,
                           ior,
                           transmission, transmission_roughness,
+                          clearcoat, clearcoat_roughness,
                           emission_color,
-                          emission_strength,
-                          sheen_color, sheen_roughness,
-                          anisotropy, anisotropy_direction,
-                          ambient_occlusion, normal_map, bent_normal, clearcoat_normal,
-                          post_lighting_color,
-                          absorption, micro_thickness, thickness) =
+                          emission_strength) =
   ifc_material(name,
     red=Float64(red(base_color)),
     green=Float64(green(base_color)),
@@ -1053,7 +1048,7 @@ KhepriBase.b_delete_all_shape_refs(b::IFC_backend) =
 
 save_ifc(path::String, b::IFC_backend=ifc) =
   let st = ensure_init!(b)
-    KhepriBase.realize_shapes(b)
+    realize_shapes(b)
     st.model.write(path)
     path
   end
